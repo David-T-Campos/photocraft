@@ -75,6 +75,7 @@ pub fn selective_color_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: La
         p["layer"] = json!(id.0);
         let _ = app.run("layer.setAdjustment", p);
         app.live_adjust = None;
+        ui.ctx().request_repaint();
     }
 }
 
