@@ -1372,6 +1372,9 @@ pub fn layer_editor(app: &mut PhotocraftApp, ui: &mut egui::Ui, id: LayerId, adj
             tone::keep_after_commit(app, id, rev);
         }
         app.live_adjust = None;
+        // Properties are drawn after the canvas in the app pass. The release must therefore
+        // schedule the frame that replaces the proxy with the committed full-quality canvas.
+        ui.ctx().request_repaint();
     }
 }
 
