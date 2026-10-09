@@ -27,6 +27,21 @@ pub fn preview_factor(doc: &Document, reduced: bool) -> u32 {
     if reduced { factor(doc) } else { 1 }
 }
 
+/// Downscale factor for a live canvas preview at `physical_zoom` physical screen pixels per
+/// document pixel. A reduced preview is never coarser than the pixels the display can show, so
+/// zoom and HiDPI scaling cannot magnify proxy pixels.
+pub fn preview_factor_for_view(doc: &Document, reduced: bool, physical_zoom: f32) -> u32 {
+    let k = preview_factor(doc, reduced);
+    if k <= 1 || !physical_zoom.is_finite() || physical_zoom <= 0.0 {
+        return 1;
+    }
+    let screen_limit = (1.0 / physical_zoom).floor();
+    if screen_limit < 2.0 {
+        return 1;
+    }
+    k.min(screen_limit as u32)
+}
+
 pub use photocraft_compose::proxy::{downsample, proxy_document};
 
 #[cfg(test)]
@@ -46,6 +61,16 @@ mod tests {
         assert_eq!(preview_factor(&big, true), k);
         assert_eq!(preview_factor(&big, false), 1);
         assert_eq!(preview_factor(&small, true), 1);
+    }
+
+    #[test]
+    fn preview_factor_never_undersamples_the_physical_view() {
+        let big = Document::new("b", Size::new(6016, 6016), ColorMode::Rgb, SampleType::U8);
+        let k = factor(&big);
+        assert_eq!(preview_factor_for_view(&big, true, 1.0), 1, "100% at 1x");
+        assert_eq!(preview_factor_for_view(&big, true, 0.5), k.min(2), "50% at 1x");
+        assert_eq!(preview_factor_for_view(&big, true, 0.5 * 2.0), 1, "50% at 2x HiDPI is one physical pixel per document pixel");
+        assert_eq!(preview_factor_for_view(&big, false, 0.1), 1);
     }
 
     #[test]
