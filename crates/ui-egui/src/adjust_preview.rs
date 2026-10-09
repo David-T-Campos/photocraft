@@ -329,6 +329,8 @@ pub fn settling(app: &PhotocraftApp, ms: f64) -> bool {
 
 /// Documents above this size preview zoomed-out views on a reduced copy ([`gpu_proxy`]).
 const PROXY_MIN_PIXELS: u64 = 4_000_000;
+/// Idle time after the last adjustment change before the main canvas refines at full quality.
+pub const PROXY_SETTLE_MS: u64 = 200;
 /// Proxy document ids: the document's id with this bit flipped.
 const PROXY_DOC_BIT: u64 = 1 << 60;
 /// Proxy layer ids: the layer's id with this bit flipped (document layer ids are small counters;
@@ -372,6 +374,16 @@ pub fn proxy_with_settings(proxy: &Document, kind: &str, params: &Value) -> Resu
     set_adjustment(proxy, LayerId(PREVIEW_LAYER.0 ^ PROXY_LAYER_BIT), kind, params)
 }
 
+fn proxy_settle_after(app: &PhotocraftApp) -> Option<std::time::Duration> {
+    let p = app.adjust_preview.as_ref()?;
+    p.shown.as_ref()?;
+    let remaining = PROXY_SETTLE_MS as f64 - (crate::gpu_canvas::now_ms() - p.changed_ms);
+    if !remaining.is_finite() || remaining <= 0.0 {
+        return None;
+    }
+    std::time::Duration::try_from_secs_f64(remaining / 1000.0).ok()
+}
+
 /// A frame of the zoomed-out preview: composite `doc` (the proxy preview, its own document id)
 /// into its GPU texture over `damage` (None: everything), then draw it scaled by `k`.
 pub struct ProxyFrame {
@@ -380,6 +392,8 @@ pub struct ProxyFrame {
     pub damage: Option<Rect>,
     /// False when the texture already shows this preview.
     pub stale: bool,
+    /// Request another frame then; that frame switches back to the full-quality canvas.
+    pub settle_after: std::time::Duration,
     hash: u64,
 }
 
@@ -392,6 +406,7 @@ pub fn gpu_proxy(app: &mut PhotocraftApp, idx: usize, zoom: f32) -> Option<Proxy
     }
     let gpu = app.gpu.clone()?;
     update(app, idx)?;
+    let settle_after = proxy_settle_after(app)?;
     let p = app.adjust_preview.as_mut()?;
     p.shown.as_ref()?;
     let base = p.base.clone()?;
@@ -418,7 +433,7 @@ pub fn gpu_proxy(app: &mut PhotocraftApp, idx: usize, zoom: f32) -> Option<Proxy
     let kk = k as i32;
     let scaled = Rect::new(r.x0.div_euclid(kk), r.y0.div_euclid(kk), r.x1.div_euclid(kk) + 1, r.y1.div_euclid(kk) + 1).intersect(&doc.bounds());
     let damage = g.drawn.map(|_| scaled);
-    Some(ProxyFrame { k, doc, damage, stale: g.drawn != Some(h), hash: h })
+    Some(ProxyFrame { k, doc, damage, stale: g.drawn != Some(h), settle_after, hash: h })
 }
 
 /// Record that `frame` was composited into the proxy's texture.
